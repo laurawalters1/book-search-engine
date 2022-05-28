@@ -1,38 +1,31 @@
 const { Tech, User } = require("../models");
+const { AuthenticationError } = require("apollo-server-express");
+
+const { signToken } = require("../utils/auth");
 
 const resolvers = {
   Query: {
-    me: async ({ user = null, params }) => {
-      const foundUser = await User.findOne({
-        $or: [
-          { _id: user ? user._id : params.id },
-          { username: params.username },
-        ],
-      });
+    me: async (parent, args, context) => {
+      if (context.user) {
+        const userData = await User.findOne({ _id: context.user._id }).select(
+          "-__v -password"
+        );
 
-      if (!foundUser) {
-        return console.log("No user with this id");
+        return userData;
       }
-
-      console.log(foundUser);
-      return foundUser;
+      throw new AuthenticationError("Please log in");
     },
   },
   Mutation: {
     addUser: async (parent, args) => {
       const user = await User.create(args);
-
-      if (!user) {
-        return console.log("Error");
-      }
       const token = signToken(user);
-      console.log(user);
-      return { user, token };
+
+      return { token, user };
     },
     // !Should this be a mutation or query?
-    loginUser: async (parent, { username, email, password }) => {
-      // !Will this implicit definition be valid?
-      const user = await User.findOne({ $or: [{ username }, { email }] });
+    loginUser: async (parent, { email, password }) => {
+      const user = await User.findOne({ email });
       if (!user) {
         return console.log("No user found");
       }
@@ -46,24 +39,27 @@ const resolvers = {
       console.log(user);
       return { token, user };
     },
-    saveBook: async (parent, { user, body }) => {
-      console.log(user);
+    saveBook: async (parent, args, context) => {
       try {
-        const updatedUser = await User.findOneAndUpdate(
-          { _id: user._id },
-          { $addToSet: { savedBooks: body } },
-          { new: true, runValidators: true }
-        );
-        console.log(updatedUser);
-        return updatedUser;
+        if (context.user) {
+          const updatedUser = await User.findByIdAndUpdate(
+            { _id: context.user._id },
+            { $addToSet: { savedBooks: args.input } },
+            { new: true, runValidators: true }
+          );
+
+          return updatedUser;
+        }
+        throw new AuthenticationError("You need to be logged in!");
       } catch (err) {
         console.log(err);
         return;
       }
     },
-    deleteBook: async (parent, { user, bookId }) => {
+    deleteBook: async (parent, { bookId }, context) => {
+      console.log(bookId);
       const updatedUser = await User.findOneAndUpdate(
-        { _id: user._id },
+        { _id: context.user._id },
         // !Will this implicit definition be valid?
         { $pull: { savedBooks: { bookId } } },
         { new: true }
